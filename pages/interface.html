@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SChat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      background-color: black;
+
+      font-family: Helvetica, "Times New Roman", serif;
+    }
+    body > * {
+      padding: 8px;
+      background-color: white;
+      background-clip: border-box;
+      margin: 0;
+    }
+    .send-holder {
+      margin: 0;
+      padding: 8px;
+      color: white;
+      background-color: black;
+      position: sticky;
+      bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1>SChat Interface</h1>
+  <h2>Room Name: {{chatRoomName}}</h2>
+  <div id="chat-logs-holder">
+  </div>
+  <div class="send-holder">
+    <p style="font-size: .8em; font-style: italic;">
+      Note: Any message older than 100 messages in history will be deleted.
+    </p>
+    <p>Name: <input maxlength="32" id="namebox"></p>
+    <p>Message: <input type="text" maxlength="256" id="msg" style="width: 100%;"></p>
+    <p><button id="sendbtn">Send</button></p>
+    <p id="error" style="background:red;">&nbsp;</p>
+  </div>
+  <script>
+    const readOnly = location.pathname === "/chat/announcements" ? true : false;
+    let logBox = document.querySelector("#chat-logs-holder");
+    const nameBox = document.querySelector("#namebox");
+    const msgBox = document.querySelector("#msg");
+    const errBox = document.querySelector("#error");
+    const btn = document.querySelector("#sendbtn");
+    const showError = (errText) => {
+      if (errText === "") errBox.innerHTML = "&nbsp;";
+      else errBox.textContent = errText;
+    }
+    let sendInProgress = false;
+    const lockInput = () => {
+      for (i of [nameBox, msgBox, btn]) i.setAttribute("disabled", "");
+      sendInProgress = true;
+    }
+    const unlockInput = readOnly ? lockInput : () => {
+      for (i of [nameBox, msgBox, btn]) i.removeAttribute("disabled", "");  
+      sendInProgress = false;
+    }
+
+    if (readOnly) {
+      lockInput();
+      document.querySelector(".send-holder").remove();
+    };
+
+    const date2time = (dateObj) => {
+      const p /*padStart */ = x => x.padStart(2, "0");
+      const r /*shortcut */ = y => p((dateObj[`get${y[0].toUpperCase()}${y.substr(1)}`]()+(y==="month")).toString());
+      return `${r("date")}/${r("month")}/${r("fullYear")} ${r("hours")}:${r("minutes")}:${r("seconds")}`
+    }
+
+    const fetchLog = (scroll=false) => {
+      fetch("/log", {
+        headers: {
+          "x-schat-log-room": "{{chatRoomName}}"
+        }
+      }).then((res) => {
+        if (!res.ok) {
+          throw new Error("Fetch Not Okay")
+        } else {
+          return res.text();
+        }
+      }).then(resText => {
+        const resMessages = resText.trim().split("\n\n").filter(x => x.trim() !== "");
+        const msgList = [];
+        for (let i of resMessages) {
+          const msgData = i.split("\n");
+          msgList.push({
+            name: msgData[0],
+            timestamp: +msgData[1],
+            text: msgData[2]
+          });
+        }
+        const elemList = [];
+        for (let data of msgList) {
+          const div = document.createElement("div");
+          div.classList.add("message-holder");
+          div.append(`${date2time(new Date(data.timestamp))} `)
+          const boldpart = document.createElement("span");
+          boldpart.style.fontWeight = "bold";
+          boldpart.textContent = `${data.name}: `;
+          div.append(boldpart);
+          div.append(data.text);
+          elemList.push(div);
+        }
+        const newLogBox = document.createElement("div");
+        newLogBox.id = "chat-logs-holder";
+        newLogBox.append(...elemList);
+        logBox.after(newLogBox);
+        logBox.remove();
+        logBox = newLogBox;
+        console.log("Update Log Success!");
+
+        if (scroll) {
+          window.scrollTo(0, document.body.offsetHeight);
+        }
+      }).catch((e) => {
+        console.log(e);
+        showError("Chat fetch failed. Check your network. This chat may have been deleted, reload to start new chat.");
+      })
+    };
+
+    btn.addEventListener("click", () => {
+      if (sendInProgress) {
+        lockInput();
+        errBox.prepend("!! Sending still in progress !!");
+        return;
+      }
+      name = nameBox.value;
+      message = msgBox.value;
+      if (name.trim() === "") { showError("Please provide a name"); return; }
+      if (message.trim() === "") { showError("Please provide a message"); return; }
+      if (name.length > 32) { showError("Name is too long, max 32 chars"); return; }
+      if (message.length > 256) { showError("Message is too long, max 256 chars"); return; }
+      showError("");
+      lockInput();
+      const safeName = encodeURIComponent(name);
+      const safeMessage = encodeURIComponent(message);
+      fetch("../message?name=" + safeName + "&message=" + safeMessage + "&room={{chatRoomName}}")
+      .then((res) => {
+        if (!res.ok) {
+          showError(`${res.status} ${res.statusText}: ${res.headers.get("X-Error-Msg")}`);
+        } else {
+          showError("");
+          console.log(res);
+        }
+      }).finally(() => {
+        unlockInput();
+        setTimeout(()=>{fetchLog(true);}, 0);
+      })
+    })
+
+    
+    fetchLog(true);
+    setInterval(fetchLog, 10 * 1000); /* 10 seconds */
+  </script>
+</body>
+</html>
